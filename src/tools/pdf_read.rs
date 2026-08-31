@@ -99,8 +99,10 @@ impl PdfReadTool {
         let doc = Document::load(path)
             .map_err(|e| ZeptoError::Tool(format!("Failed to load PDF: {e}")))?;
         let mut text = String::new();
-        for page_id in doc.page_iter() {
-            if let Ok(page_text) = doc.extract_text(&[page_id.0]) {
+        // lopdf extract_text takes 1-based page ordinals, not object ids.
+        let page_count = doc.get_pages().len() as u32;
+        for page_number in 1..=page_count {
+            if let Ok(page_text) = doc.extract_text(&[page_number]) {
                 text.push_str(&page_text);
                 text.push('\n');
             }
@@ -203,6 +205,78 @@ mod tests {
 
     fn tool(workspace: &str) -> PdfReadTool {
         PdfReadTool::new(workspace.to_string())
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "tool-pdf")]
+    async fn test_extracts_text_from_real_pdf() {
+        // Round-trip smoke: build a real one-page PDF with lopdf itself, then
+        // verify the tool's lopdf parse path (Document::load + extract_text)
+        // reads the text back. Guards the RUSTSEC-2026-0187 upgrade surface.
+        use lopdf::content::{Content, Operation};
+        use lopdf::{dictionary, Document, Object, Stream, StringFormat};
+
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path().to_str().unwrap();
+
+        let mut doc = Document::with_version("1.4");
+        let pages_id = doc.new_object_id();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 14.into()]),
+                Operation::new("Td", vec![72.into(), 700.into()]),
+                Operation::new(
+                    "Tj",
+                    vec![Object::String(
+                        b"HelloSmoke".to_vec(),
+                        StringFormat::Literal,
+                    )],
+                ),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Contents" => content_id,
+            "Resources" => dictionary! {
+                "Font" => dictionary! { "F1" => font_id },
+            },
+        });
+        let pages_id = doc.add_object(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        });
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        let pdf_path = tmp.path().join("smoke.pdf");
+        doc.save(&pdf_path).unwrap();
+
+        let direct = PdfReadTool::extract_text(&pdf_path);
+        let text = direct.expect("lopdf should parse the generated PDF");
+        assert!(text.contains("HelloSmoke"), "extracted: {text:?}");
+
+        let t = tool(ws);
+        let ctx = ToolContext::default();
+        let result = t
+            .execute(serde_json::json!({"path": "smoke.pdf"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            result.for_llm.contains("HelloSmoke"),
+            "expected extracted text in for_llm, got: {:?}",
+            result.for_llm
+        );
     }
 
     #[test]

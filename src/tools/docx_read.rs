@@ -14,6 +14,9 @@ use crate::security::{revalidate_path, validate_path_in_workspace};
 
 use super::{Tool, ToolContext, ToolOutput};
 
+/// XML version assumed when decoding DOCX text runs (DOCX content is XML 1.0).
+const DOCX_XML_VERSION: quick_xml::XmlVersion = quick_xml::XmlVersion::Implicit1_0;
+
 /// Maximum DOCX file size accepted before extraction (50 MB).
 const MAX_DOCX_BYTES: u64 = 50 * 1024 * 1024;
 
@@ -146,14 +149,14 @@ impl DocxReadTool {
                 }
                 Ok(Event::Text(ref e))
                     if in_t => {
-                        e.xml_content(quick_xml::XmlVersion::Implicit1_0)
+                        e.xml_content(DOCX_XML_VERSION)
                             .map(|d| output.push_str(&d))
                             .map_err(|e| ZeptoError::Tool(format!("XML decode error: {e}")))?;
                     }
                 Ok(Event::GeneralRef(ref e))
                     // Remove escaped entities if they can't be resolved
                     if in_t => {
-                        e.xml_content(quick_xml::XmlVersion::Implicit1_0)
+                        e.xml_content(DOCX_XML_VERSION)
                             .map(|d| resolve_xml_entity(d.as_ref()).map(|r| output.push_str(r)))
                             .map_err(|e| ZeptoError::Tool(format!("XML decode error: {e}")))?;
                     }
