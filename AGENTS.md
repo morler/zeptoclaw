@@ -60,7 +60,8 @@ Project-level guidance for coding agents working in this repository.
 - Panel CLI fallback: feature-disabled builds still parse `zeptoclaw panel ...` and return explicit `--features panel` guidance instead of a raw unknown-subcommand error
 - Uninstall CLI: `zeptoclaw uninstall` removes `~/.zeptoclaw`; `--remove-binary` deletes direct installs in `~/.local/bin` or `/usr/local/bin` and defers Homebrew/Cargo binaries to their package managers
 - Process exit codes: explicit `main` mapping for success (0) and error (1); uncaught panic/crash remains Rust default (101)
-- Tests: current local validation passes `cargo fmt -- --check`, `cargo clippy -- -D warnings`, `cargo nextest run --lib` (3512 passed, 6 skipped), and `cargo test --doc` (128 passed, 27 ignored)
+- Security audit hardening: constant-time bearer compares (panel API/WS), login rate limit (5 failures/15 min), 0600 perms on token/config/session/media files, native-runtime env scrubbing + process-group kill on timeout, auth-gated CSRF endpoint, cloudflared token via TUNNEL_TOKEN env
+- Tests: current local validation passes `cargo fmt -- --check`, `cargo clippy -- -D warnings`, `cargo nextest run --lib` (3515 passed, 5 skipped), and `cargo test --doc` (128 passed, 27 ignored)
 
 ## Task Tracking Protocol
 
@@ -117,58 +118,4 @@ cargo bench --bench message_bus --no-run
 - Keep changes minimal and focused.
 - Prefer small, composable functions over large blocks.
 - Do not add `unwrap()`/`expect()` in production paths unless failure is truly unrecoverable.
-- Preserve existing module boundaries and public APIs unless explicitly requested.
-- Keep comments short and only where intent is non-obvious.
-
-## Runtime and Provider Notes
-
-- Runtime isolation features must remain opt-in and degrade safely to native runtime.
-- Provider wiring should remain consistent across config, onboarding, status output, and runtime behavior.
-- Do not hardcode a single provider path when multiple providers are supported.
-
-## Documentation Rules
-
-- Keep README/docs claims aligned with executable behavior.
-- Do not add performance numbers unless they are reproducible with repository commands.
-- If adding new commands or workflows, include a runnable example.
-
-## Release Versioning
-
-- Use `patch` for backward-compatible bug fixes, reliability hardening, docs corrections, and internal refactors that do not add user-visible capability.
-- Use `minor` for backward-compatible new functionality such as new commands, flags, config fields, tools, providers, runtimes, channels, or other opt-in capabilities.
-- If upgrading should only give existing users fixes, choose `patch`.
-- If upgrading gives existing users new capabilities without requiring migration, choose `minor`.
-
-## Change Hygiene
-
-- Do not revert unrelated local changes.
-- If you detect unexpected file modifications during work, pause and ask before proceeding.
-- Include file/line references when reporting review findings.
-
-## Common Patterns
-
-### Adding a config field
-1. Add field + doc comment to struct in `src/config/types.rs`
-2. Set default in `Default` impl
-3. Add env override in `src/config/mod.rs` if needed
-4. Add field name to `KNOWN_TOP_LEVEL` in `src/config/validate.rs`
-
-### Adding a new tool
-1. Create `src/tools/<name>.rs`
-2. Implement `Tool` trait (`name()`, `description()`, `parameters()`, `execute()`)
-3. Add `pub mod <name>;` in `src/tools/mod.rs`
-4. Register in `src/kernel/registrar.rs` inside `register_all_tools()` behind `filter.is_enabled("<name>")`
-5. If the tool assumes laptop/server environment (bash, filesystem, shell): make it opt-in by gating on `coding_tools_on` (see the grep/find block in registrar.rs), add it to the `TOOLS` array in `src/cli/tools.rs` with `opt_in: true`, and add it to `opt_in_tool_hint()` in `src/tools/registry.rs`
-
-### Adding a provider wrapper
-1. Create `src/providers/<name>.rs`
-2. Implement `LLMProvider` trait (must impl both `chat()` and `chat_stream()`)
-3. Add `pub mod <name>;` + re-export in `src/providers/mod.rs`
-4. Wire in `src/cli/common.rs` provider resolution
-
-### Key code patterns
-- `ProviderRef` wrapper in `delegate.rs` — converts `Arc<dyn LLMProvider>` to `Box<dyn LLMProvider>`
-- Builder pattern for provider wrappers — `RetryProvider::new(inner).with_max_retries(5)`
-- Interior mutability via `Mutex<HashMap>` — used in MetricsCollector, OpenAIProvider
-- Atomic counters via `AtomicU64` — used in TokenBudget for lock-free token tracking
-- Recursion blocking — check `ctx.channel` to prevent delegate/spawn infinite loops
+- Preserve ...

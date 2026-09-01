@@ -28,7 +28,7 @@ pub async fn ws_events(
     let is_authenticated = params
         .get("auth")
         .map(|token| {
-            token == &state.api_token
+            crate::api::auth::constant_time_eq(token, &state.api_token)
                 || crate::api::auth::validate_jwt(token, &state.jwt_secret).is_ok()
         })
         .unwrap_or(false);

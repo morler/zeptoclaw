@@ -8,12 +8,20 @@
 
 let csrfToken: string | null = null
 
-async function getCsrfToken(): Promise<string> {
+async function getCsrfToken(token: string | null): Promise<string | null> {
   if (csrfToken) return csrfToken
-  const res = await fetch('/api/csrf-token')
-  const data = await res.json()
-  csrfToken = data.token as string
-  return csrfToken
+  try {
+    // The endpoint requires auth: send the caller's Bearer token when we have one.
+    const res = await fetch('/api/csrf-token', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    csrfToken = data.token as string
+    return csrfToken
+  } catch {
+    return null
+  }
 }
 
 export function clearCsrfToken(): void {
@@ -32,7 +40,8 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   }
 
   if (isMutating) {
-    headers['X-CSRF-Token'] = await getCsrfToken()
+    const csrf = await getCsrfToken(token)
+    if (csrf) headers['X-CSRF-Token'] = csrf
   }
 
   const res = await fetch(path, { ...init, headers })
@@ -40,7 +49,8 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   if (res.status === 403 && isMutating) {
     // CSRF token might be expired — clear and retry once
     csrfToken = null
-    headers['X-CSRF-Token'] = await getCsrfToken()
+    const csrf = await getCsrfToken(token)
+    if (csrf) headers['X-CSRF-Token'] = csrf
     const retry = await fetch(path, { ...init, headers })
     if (!retry.ok) throw new Error(`API ${retry.status}: ${retry.statusText}`)
     return retry.json() as Promise<T>

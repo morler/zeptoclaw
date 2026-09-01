@@ -35,6 +35,9 @@ pub struct AppState {
     /// holds it for the lifetime of the connection; once the semaphore is
     /// exhausted the handler returns HTTP 503.
     pub ws_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Timestamps of recent failed logins, for the `/api/auth/login` rate
+    /// limit (rolling window, pruned on each attempt). (#654)
+    pub login_failures: Arc<std::sync::Mutex<Vec<std::time::Instant>>>,
     // ── Real data stores (all optional — set when wired from gateway/CLI) ───
     /// Session manager for reading and deleting conversation sessions.
     pub session_manager: Option<Arc<crate::session::SessionManager>>,
@@ -57,6 +60,11 @@ impl AppState {
     /// Maximum number of concurrent WebSocket connections.
     pub const MAX_WS_CONNECTIONS: usize = 5;
 
+    /// Max failed logins allowed in the rolling window before 429 (#654).
+    pub const LOGIN_MAX_FAILURES: usize = 5;
+    /// Rolling window length for failed-login rate limiting (#654).
+    pub const LOGIN_WINDOW: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
     pub fn new(api_token: String, event_bus: EventBus) -> Self {
         Self {
             api_token,
@@ -64,6 +72,7 @@ impl AppState {
             password_hash: None,
             jwt_secret: uuid::Uuid::new_v4().to_string(),
             ws_semaphore: Arc::new(tokio::sync::Semaphore::new(Self::MAX_WS_CONNECTIONS)),
+            login_failures: Arc::new(std::sync::Mutex::new(Vec::new())),
             session_manager: None,
             task_store: None,
             health_registry: None,
@@ -73,13 +82,33 @@ impl AppState {
             config: None,
         }
     }
+
+    /// True when recent failed logins have hit the rate limit (#654).
+    pub fn login_throttled(&self) -> bool {
+        let mut failures = self.failures();
+        let now = std::time::Instant::now();
+        failures.retain(|t| now.duration_since(*t) < Self::LOGIN_WINDOW);
+        failures.len() >= Self::LOGIN_MAX_FAILURES
+    }
+
+    /// Record a failed login attempt (#654).
+    pub fn record_login_failure(&self) {
+        self.failures().push(std::time::Instant::now());
+    }
+
+    fn failures(&self) -> std::sync::MutexGuard<'_, Vec<std::time::Instant>> {
+        self.login_failures
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 /// Handler for `GET /api/csrf-token`.
 ///
-/// Returns a fresh CSRF token bound to the server's `jwt_secret`.  The
-/// endpoint is public (no `Authorization` header required) so that a browser
-/// or CLI client can obtain a token before making any mutating request.
+/// Returns a fresh CSRF token bound to the server's `jwt_secret`.
+///
+/// Requires a valid `Authorization: Bearer` header: minting CSRF tokens for
+/// unauthenticated callers would make the CSRF layer self-defeating.
 async fn csrf_token_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let token = super::middleware::generate_csrf_token(&state.jwt_secret);
     Json(serde_json::json!({ "token": token }))

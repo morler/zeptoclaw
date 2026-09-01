@@ -75,8 +75,9 @@ impl TunnelProvider for CloudflareTunnel {
 
         if let Some(ref cfg) = self.config {
             if let Some(ref token) = cfg.token {
-                // Named tunnel with token
-                cmd.arg("tunnel").arg("--token").arg(token).arg("run");
+                // Named tunnel with token — pass via env (cloudflared reads
+                // TUNNEL_TOKEN) so the secret never appears in /proc cmdline.
+                cmd.arg("tunnel").arg("run").env("TUNNEL_TOKEN", token);
                 info!("Starting cloudflared named tunnel on port {}", local_port);
             } else {
                 // Quick tunnel (free, random URL)

@@ -91,10 +91,22 @@ impl MediaStore {
 
         // Skip write if the file already exists (deduplication).
         if abs_path.exists() {
+            // Repair overly-wide permissions from older runs (#652).
+            crate::utils::perms::set_owner_only(&abs_path);
             return Ok(rel_path);
         }
 
-        fs::write(&abs_path, data).await?;
+        // Owner-only BEFORE the first byte lands (#652).
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&abs_path)
+            .await?;
+        crate::utils::perms::set_owner_only(&abs_path);
+        use tokio::io::AsyncWriteExt;
+        file.write_all(&data).await?;
+
         Ok(rel_path)
     }
 

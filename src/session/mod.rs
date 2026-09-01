@@ -259,7 +259,16 @@ impl SessionManager {
         if let Some(ref storage_path) = self.storage_path {
             let file_path = storage_path.join(format!("{}.json", Self::sanitize_key(&session.key)));
             let content = serde_json::to_string_pretty(session)?;
-            tokio::fs::write(&file_path, content).await?;
+            // Owner-only BEFORE the first secret byte lands (#652).
+            let mut file = tokio::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&file_path)
+                .await?;
+            crate::utils::perms::set_owner_only(&file_path);
+            use tokio::io::AsyncWriteExt;
+            file.write_all(content.as_bytes()).await?;
         }
 
         Ok(())

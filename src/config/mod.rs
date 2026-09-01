@@ -1569,7 +1569,16 @@ impl Config {
         }
 
         let content = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, content)?;
+        // Owner-only BEFORE the first secret byte lands (#652).
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(path)?;
+        crate::utils::perms::set_owner_only(path);
+        use std::io::Write;
+        file.write_all(content.as_bytes())?;
+
         Ok(())
     }
 

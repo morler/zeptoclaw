@@ -115,7 +115,10 @@ fn token_path() -> PathBuf {
 /// If the token file already contains a non-empty token, it is returned as-is.
 /// Otherwise a fresh 64-char hex token is generated, persisted, and returned.
 async fn ensure_api_token(token_path: &PathBuf) -> Result<String> {
+    use tokio::io::AsyncWriteExt;
     if token_path.exists() {
+        // Repair overly-wide permissions left by older installs (#652).
+        zeptoclaw::utils::perms::set_owner_only(token_path);
         let token = tokio::fs::read_to_string(token_path)
             .await
             .with_context(|| format!("Failed to read token file: {}", token_path.display()))?;
@@ -133,7 +136,17 @@ async fn ensure_api_token(token_path: &PathBuf) -> Result<String> {
             .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
     }
 
-    tokio::fs::write(token_path, &token)
+    // Owner-only BEFORE the first secret byte lands — no world-readable
+    // window between create and chmod (#652).
+    let mut file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(token_path)
+        .await
+        .with_context(|| format!("Failed to open token file: {}", token_path.display()))?;
+    zeptoclaw::utils::perms::set_owner_only(token_path);
+    file.write_all(token.as_bytes())
         .await
         .with_context(|| format!("Failed to write token file: {}", token_path.display()))?;
 
@@ -218,7 +231,10 @@ async fn cmd_start(
             panel_config.bind, panel_config.port
         );
     }
-    println!("API token: {api_token}");
+    println!(
+        "API token: stored in {} (read with `cat`)",
+        token_path().display()
+    );
     println!("Press Ctrl+C to stop.");
 
     start_server(&panel_config, state, static_dir)
@@ -368,10 +384,10 @@ async fn cmd_install(download: bool, rebuild: bool) -> Result<()> {
     // 7. Ensure an API token exists (generate + persist if missing)
     // ------------------------------------------------------------------
     let tp = token_path();
-    let token = ensure_api_token(&tp).await?;
+    ensure_api_token(&tp).await?;
 
     println!("\n  Panel installed successfully!");
-    println!("  API token: {token}");
+    println!("  API token written to {} (read with `cat`)", tp.display());
     println!("\n  Start with: zeptoclaw panel");
 
     Ok(())

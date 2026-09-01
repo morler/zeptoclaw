@@ -96,7 +96,6 @@ pub fn validate_csrf_token(token: &str, secret: &str) -> bool {
 ///
 /// Skips auth for:
 /// - `GET /api/health` — liveness probe, no auth required
-/// - `GET /api/csrf-token` — must be public so the caller can bootstrap
 /// - `POST /api/auth/login` — exchanges password for JWT
 /// - Any path starting with `/ws/` — WebSocket upgrade handshake
 ///
@@ -116,11 +115,9 @@ pub async fn auth_middleware(
     let path = request.uri().path();
 
     // Public endpoints that skip auth entirely.
-    if path == "/api/health"
-        || path == "/api/csrf-token"
-        || path == "/api/auth/login"
-        || path.starts_with("/ws/")
-    {
+    // `/api/csrf-token` intentionally requires auth: handing CSRF tokens to
+    // unauthenticated callers would let them mint their own.
+    if path == "/api/health" || path == "/api/auth/login" || path.starts_with("/ws/") {
         return Ok(next.run(request).await);
     }
 
@@ -135,7 +132,7 @@ pub async fn auth_middleware(
             let token = &header[7..];
 
             // Accept static API token OR a valid JWT.
-            let is_valid = token == state.api_token
+            let is_valid = crate::api::auth::constant_time_eq(token, &state.api_token)
                 || crate::api::auth::validate_jwt(token, &state.jwt_secret).is_ok();
 
             if !is_valid {
@@ -222,14 +219,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_csrf_endpoint_skips_auth() {
+    async fn test_csrf_endpoint_requires_auth() {
         let app = make_app(make_state());
         let req = Request::builder()
             .uri("/api/csrf-token")
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
+        // No longer public: minting CSRF tokens for unauthenticated callers
+        // would defeat the CSRF layer.
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

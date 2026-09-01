@@ -1,3 +1,4 @@
+import { clearCsrfToken } from '../lib/api';
 // useAuth — manages panel authentication state.
 //
 // Persists the token in localStorage under the key "panel_token" so the user
@@ -38,6 +39,7 @@ export function useAuth() {
   }, [])
 
   const logout = useCallback(() => {
+    clearCsrfToken();
     localStorage.removeItem('panel_token')
     setToken(null)
   }, [])

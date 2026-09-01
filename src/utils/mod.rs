@@ -3,6 +3,7 @@
 pub mod cost;
 pub mod logging;
 pub mod metrics;
+pub mod perms;
 pub mod sanitize;
 pub mod slo;
 pub mod string;

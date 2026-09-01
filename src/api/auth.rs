@@ -44,7 +44,7 @@ pub fn generate_api_token() -> String {
 /// expected token.
 ///
 /// Strips the `"Bearer "` prefix (case-sensitive, with a trailing space),
-/// then performs a constant-time-like string comparison via `==`.
+/// then performs a constant-time string comparison.
 ///
 /// # Errors
 ///
@@ -56,11 +56,29 @@ pub fn verify_bearer_token(header: &str, expected: &str) -> Result<()> {
         .strip_prefix("Bearer ")
         .ok_or_else(|| ZeptoError::Unauthorized("missing Bearer prefix".to_string()))?;
 
-    if token == expected {
+    if constant_time_eq(token, expected) {
         Ok(())
     } else {
         Err(ZeptoError::Unauthorized("invalid API token".to_string()))
     }
+}
+
+/// Constant-time byte-wise equality for secret comparisons.
+///
+/// Accumulates XOR over all bytes so runtime does not reveal where the
+/// strings first differ. Returns `false` immediately if lengths differ
+/// (length is not considered secret for Bearer tokens).
+pub(crate) fn constant_time_eq(a: &str, b: &str) -> bool {
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut result = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        result |= x ^ y;
+    }
+    result == 0
 }
 
 // ============================================================================

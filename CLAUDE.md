@@ -85,6 +85,7 @@ landing/         # Static landing page
 For detailed module docs see `docs/claude/architecture.md`.
 
 ## Coding Core Notes
+- Security hardening: constant-time bearer compares (panel API/WS), login rate limit (5 fails/15 min), atomic owner-only (0600) creation for token/config/session/media files, native-runtime env scrubbing + process-group kill on timeout, auth-gated CSRF endpoint, TUNNEL_TOKEN env for cloudflared.
 
 - Embedded `ZeptoAgent` tool calls use the same `kernel::execute_tool()` path as the main agent loop and MCP server, so safety scanning, taint checks, and tool metrics stay aligned across entry points.
 - Embedded `ZeptoAgent` also supports per-tool timeout, panic capture, and configurable approval gating via the builder for safer embedded coding-agent execution.

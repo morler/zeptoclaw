@@ -45,6 +45,11 @@ pub async fn login(
 ) -> Result<Json<LoginResponse>, StatusCode> {
     match &state.password_hash {
         Some(hash) => {
+            // Brute-force brake in addition to bcrypt cost (#654).
+            if state.login_throttled() {
+                return Err(StatusCode::TOO_MANY_REQUESTS);
+            }
+
             let ok = crate::api::auth::verify_password(&body.password, hash)
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -53,6 +58,7 @@ pub async fn login(
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
                 Ok(Json(LoginResponse { token }))
             } else {
+                state.record_login_failure();
                 Err(StatusCode::UNAUTHORIZED)
             }
         }
@@ -147,5 +153,29 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_login_rate_limited_after_max_failures() {
+        let state = make_state_with_password("correct-password");
+        // Pre-fill the rolling failure window up to the limit.
+        for _ in 0..5 {
+            state
+                .login_failures
+                .lock()
+                .unwrap()
+                .push(std::time::Instant::now());
+        }
+        let app = Router::new()
+            .route("/api/auth/login", post(super::login))
+            .with_state(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/auth/login")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"password":"wrong"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 }
