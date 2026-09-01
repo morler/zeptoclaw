@@ -3,42 +3,38 @@
 use crate::api::events::EventBus;
 use crate::api::server::AppState;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Query, State};
-use std::collections::HashMap;
+use axum::extract::State;
 use std::sync::Arc;
 
 /// GET /ws/events — upgrades to WebSocket, streams PanelEvents as JSON.
 ///
 /// Authentication: Browsers cannot set custom headers during the WebSocket
 /// upgrade handshake, so the `/ws/` path is exempt from the auth middleware.
-/// Instead, this handler validates the auth token from a `?auth=<token>`
-/// query parameter before upgrading.  Both static API tokens and valid JWTs
-/// are accepted.
+/// The client offers its token (static API token or JWT) as a
+/// `Sec-WebSocket-Protocol` value — `new WebSocket(url, [token])` — and the
+/// handshake echoes the accepted protocol back.  A `?auth=` query parameter
+/// is deliberately NOT accepted: it leaks into access logs and browser
+/// history (#653).
 ///
 /// Enforces a hard cap of [`AppState::MAX_WS_CONNECTIONS`] concurrent
 /// WebSocket connections via a semaphore stored in [`AppState`].  When the
 /// cap is reached the handler responds with HTTP 503 before the upgrade so
 /// the client gets a meaningful error rather than a silent hang.
 pub async fn ws_events(
-    ws: WebSocketUpgrade,
+    mut ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
-    Query(params): Query<HashMap<String, String>>,
 ) -> axum::response::Response {
-    // Validate auth token from query param (browsers can't set headers for WS).
-    let is_authenticated = params
-        .get("auth")
-        .map(|token| {
-            crate::api::auth::constant_time_eq(token, &state.api_token)
-                || crate::api::auth::validate_jwt(token, &state.jwt_secret).is_ok()
-        })
-        .unwrap_or(false);
-
-    if !is_authenticated {
+    let Some(protocol) = select_auth_protocol(
+        ws.requested_protocols(),
+        &state.api_token,
+        &state.jwt_secret,
+    ) else {
         return axum::response::Response::builder()
             .status(axum::http::StatusCode::UNAUTHORIZED)
             .body(axum::body::Body::from("Missing or invalid auth token"))
             .expect("response build is infallible");
-    }
+    };
+    ws.set_selected_protocol(protocol);
 
     // Try to acquire a connection slot.  `try_acquire_owned` is non-blocking:
     // it either succeeds immediately or returns `TryAcquireError::NoPermits`.
@@ -56,6 +52,22 @@ pub async fn ws_events(
     // Move the permit into the connection task so it is dropped (released)
     // only when the WebSocket connection closes.
     ws.on_upgrade(move |socket| handle_ws(socket, event_bus, permit))
+}
+
+/// Returns the offered `Sec-WebSocket-Protocol` value that authenticates
+/// the client — the static API token or a valid JWT — so the handshake can
+/// echo it back (#653).
+fn select_auth_protocol<'a>(
+    mut protocols: impl Iterator<Item = &'a axum::http::HeaderValue>,
+    api_token: &str,
+    jwt_secret: &str,
+) -> Option<axum::http::HeaderValue> {
+    protocols
+        .find(|p| {
+            p.to_str()
+                .is_ok_and(|t| crate::api::auth::verify_token_or_jwt(t, api_token, jwt_secret))
+        })
+        .cloned()
 }
 
 async fn handle_ws(
@@ -103,11 +115,30 @@ mod tests {
 
     #[test]
     fn test_ws_handler_compiles() {
-        use axum::extract::Query;
-        use std::collections::HashMap;
         // Verify the handler signature is correct for axum routing.
-        let _: fn(WebSocketUpgrade, State<Arc<AppState>>, Query<HashMap<String, String>>) -> _ =
-            |ws, state, query| ws_events(ws, state, query);
+        let _: fn(WebSocketUpgrade, State<Arc<AppState>>) -> _ = |ws, state| ws_events(ws, state);
+    }
+
+    #[test]
+    fn test_select_auth_protocol() {
+        let ok = axum::http::HeaderValue::from_static("s3cret-token");
+        let bad = axum::http::HeaderValue::from_static("wrong");
+        let junk = axum::http::HeaderValue::from_static("not.a.jwt");
+
+        // First offered protocol that authenticates wins (offer order, not token type).
+        let got = select_auth_protocol([&bad, &ok].into_iter(), "s3cret-token", "jwt-secret");
+        assert_eq!(
+            got.as_ref().and_then(|h| h.to_str().ok()),
+            Some("s3cret-token")
+        );
+
+        // No offered protocol matches -> rejected.
+        assert!(
+            select_auth_protocol([&bad, &junk].into_iter(), "s3cret-token", "jwt-secret").is_none()
+        );
+
+        // Nothing offered at all -> rejected.
+        assert!(select_auth_protocol(std::iter::empty(), "s3cret-token", "jwt-secret").is_none());
     }
 
     #[test]

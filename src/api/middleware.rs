@@ -132,8 +132,8 @@ pub async fn auth_middleware(
             let token = &header[7..];
 
             // Accept static API token OR a valid JWT.
-            let is_valid = crate::api::auth::constant_time_eq(token, &state.api_token)
-                || crate::api::auth::validate_jwt(token, &state.jwt_secret).is_ok();
+            let is_valid =
+                crate::api::auth::verify_token_or_jwt(token, &state.api_token, &state.jwt_secret);
 
             if !is_valid {
                 return Err(StatusCode::UNAUTHORIZED);

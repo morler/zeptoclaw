@@ -60,7 +60,7 @@ Project-level guidance for coding agents working in this repository.
 - Panel CLI fallback: feature-disabled builds still parse `zeptoclaw panel ...` and return explicit `--features panel` guidance instead of a raw unknown-subcommand error
 - Uninstall CLI: `zeptoclaw uninstall` removes `~/.zeptoclaw`; `--remove-binary` deletes direct installs in `~/.local/bin` or `/usr/local/bin` and defers Homebrew/Cargo binaries to their package managers
 - Process exit codes: explicit `main` mapping for success (0) and error (1); uncaught panic/crash remains Rust default (101)
-- Security audit hardening: constant-time bearer compares (panel API/WS), login rate limit (5 failures/15 min), 0600 perms on token/config/session/media files, native-runtime env scrubbing + process-group kill on timeout, auth-gated CSRF endpoint, cloudflared token via TUNNEL_TOKEN env
+- Security audit hardening: constant-time bearer compares (panel API/WS), login rate limit (5 failures/15 min), 0600 perms on token/config/session/media files, native-runtime env scrubbing + process-group kill on timeout, auth-gated CSRF endpoint, cloudflared token via TUNNEL_TOKEN env, panel WS auth via Sec-WebSocket-Protocol token (query-param `?auth=` rejected, #653)
 - Tests: current local validation passes `cargo fmt -- --check`, `cargo clippy -- -D warnings`, `cargo nextest run --lib` (3515 passed, 5 skipped), and `cargo test --doc` (128 passed, 27 ignored)
 
 ## Task Tracking Protocol

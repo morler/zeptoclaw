@@ -165,6 +165,12 @@ pub fn generate_jwt(username: &str, secret: &str, expires_in_secs: u64) -> Resul
 ///
 /// Returns [`ZeptoError::Unauthorized`] for any validation failure:
 /// bad signature, expired token, malformed header/payload, wrong algorithm.
+/// Accepts the static API token or a valid JWT — the shared dual-track
+/// check used by the API auth middleware and the panel WS handshake.
+pub(crate) fn verify_token_or_jwt(token: &str, api_token: &str, jwt_secret: &str) -> bool {
+    constant_time_eq(token, api_token) || validate_jwt(token, jwt_secret).is_ok()
+}
+
 pub fn validate_jwt(token: &str, secret: &str) -> Result<Claims> {
     let token_data = decode::<Claims>(
         token,
