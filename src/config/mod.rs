@@ -39,7 +39,7 @@ fn migrate_v1_to_v2(_raw: &mut serde_json::Value) -> Result<()> {
 /// Read the schema version from a raw config value: missing = 1 (legacy).
 /// Shared by [`Config::load_from_path`] and `zeptoclaw config check` so both
 /// ports apply the same rules (#530).
-pub(crate) fn raw_config_version(raw: &serde_json::Value) -> u64 {
+pub fn raw_config_version(raw: &serde_json::Value) -> u64 {
     raw.get("version")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(1)
