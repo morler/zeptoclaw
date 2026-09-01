@@ -20,7 +20,7 @@ env:
   # Stripped release binary ceiling on aarch64-unknown-linux-musl — the
   # actual robot deployment target (Pi/Jetson-class Linux arm64). First
   # CI measurement: 8.21 MB (musl cross-compile saves ~22% vs x86_64's
-  # 10.56 MB, less than the issue's ~7 MB estimate). Headroom ~9%,
+  # 10.56 MB — well short of the issue's ~7 MB estimate). Headroom ~9%,
   # mirroring the x86_64 gate style. Trimming toward 7 MB is a separate
   # follow-up. Same escape valve: feature-gate heavy deps, don't bump
   # this number without team sign-off.
