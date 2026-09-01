@@ -35,6 +35,17 @@ async fn cmd_config_check() -> Result<()> {
         }
     };
 
+    // Version report (#530): files without a `version` field count as v1.
+    let version = zeptoclaw::config::raw_config_version(&raw);
+    let latest = u64::from(zeptoclaw::config::CONFIG_VERSION);
+    if version > latest {
+        println!("[ERROR] Config version {version} is newer than this build (supports up to {latest}); upgrade zeptoclaw.");
+    } else if version < latest {
+        println!("[WARN] Config version {version}; will migrate to {latest} on load.");
+    } else {
+        println!("[OK] Config version: {version} (latest)");
+    }
+
     let diagnostics = zeptoclaw::config::validate::validate_config(&raw);
     for diag in &diagnostics {
         println!("{}", diag);

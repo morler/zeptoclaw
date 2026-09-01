@@ -18,6 +18,33 @@ use std::sync::RwLock;
 use tracing::{error, warn};
 use url::Url;
 
+/// Current config schema version. Files without a `version` field are
+/// treated as version 1; `MIGRATIONS[v - 1]` upgrades version `v` to `v + 1`.
+pub const CONFIG_VERSION: u32 = 2;
+
+/// One pure Value-level migration per version bump. Runs in
+/// [`Config::load_from_path`] before strong typing, so cold start and
+/// hot-reload share the same path (#530).
+const MIGRATIONS: &[fn(&mut serde_json::Value) -> Result<()>] = &[migrate_v1_to_v2];
+
+// The registry must cover every step from 1 up to CONFIG_VERSION.
+const _: () = assert!(MIGRATIONS.len() as u32 + 1 == CONFIG_VERSION);
+
+/// v1 → v2: first versioned schema. No field changes — this establishes the
+/// chain itself; future bumps each add one pure function here.
+fn migrate_v1_to_v2(_raw: &mut serde_json::Value) -> Result<()> {
+    Ok(())
+}
+
+/// Read the schema version from a raw config value: missing = 1 (legacy).
+/// Shared by [`Config::load_from_path`] and `zeptoclaw config check` so both
+/// ports apply the same rules (#530).
+pub(crate) fn raw_config_version(raw: &serde_json::Value) -> u64 {
+    raw.get("version")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1)
+}
+
 /// Global configuration instance
 static CONFIG: OnceCell<RwLock<Config>> = OnceCell::new();
 
@@ -86,6 +113,29 @@ impl Config {
                 let enc = crate::security::encryption::resolve_master_key(interactive)?;
                 decrypt_config_values(&mut raw, &enc)?;
             }
+
+            // Run the version migration chain before strong typing. Files
+            // without a `version` field count as v1; a *newer* version than
+            // this build understands is rejected instead of silently losing
+            // fields (#530).
+            if !raw.is_object() {
+                return Err(ZeptoError::Config(format!(
+                    "Config at {} is not a JSON object",
+                    path.display()
+                )));
+            }
+            let mut version = raw_config_version(&raw);
+            if version < 1 || version > u64::from(CONFIG_VERSION) {
+                return Err(ZeptoError::Config(format!(
+                    "Config at {} reports invalid version {version}; this build supports 1..={CONFIG_VERSION}.",
+                    path.display()
+                )));
+            }
+            while version < u64::from(CONFIG_VERSION) {
+                MIGRATIONS[(version - 1) as usize](&mut raw)?;
+                version += 1;
+            }
+            raw["version"] = serde_json::Value::from(CONFIG_VERSION);
 
             serde_json::from_value(raw)?
         } else {
@@ -1795,6 +1845,64 @@ mod tests {
         // Defaults should apply to unspecified fields
         assert_eq!(config.agents.defaults.temperature, 0.7);
         assert_eq!(config.gateway.port, 8080);
+    }
+
+    #[test]
+    fn test_load_migrates_versioned_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"version": 1}"#).unwrap();
+        // v1 → v2 runs the (empty) migration and must deserialize cleanly.
+        Config::load_from_path(&path).unwrap();
+    }
+
+    #[test]
+    fn test_load_treats_missing_version_as_v1() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "{}").unwrap();
+        Config::load_from_path(&path).unwrap();
+    }
+
+    #[test]
+    fn test_load_rejects_zero_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"version": 0}"#).unwrap();
+        // 0 must not underflow the MIGRATIONS index.
+        let err = Config::load_from_path(&path).unwrap_err();
+        assert!(err.to_string().contains("invalid version 0"), "got: {err}");
+    }
+
+    #[test]
+    fn test_load_rejects_version_beyond_u32() {
+        // 2^32 + 2 must not truncate to 2 and slip through as "latest".
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"version": 4294967298}"#).unwrap();
+        let err = Config::load_from_path(&path).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid version 4294967298"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_raw_config_version_rules() {
+        let v = |s: &str| raw_config_version(&serde_json::from_str(s).unwrap());
+        assert_eq!(v("{}"), 1);
+        assert_eq!(v(r#"{"version": 7}"#), 7);
+        // Non-numeric version counts as missing/legacy rather than panicking.
+        assert_eq!(v(r#"{"version": "x"}"#), 1);
+    }
+
+    #[test]
+    fn test_load_rejects_newer_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"version": 99}"#).unwrap();
+        let err = Config::load_from_path(&path).unwrap_err();
+        assert!(err.to_string().contains("version 99"), "got: {err}");
     }
 
     #[test]
