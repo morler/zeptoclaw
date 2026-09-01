@@ -10,12 +10,17 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_TERM_QUIET: "true" # F.I.R.S.T. principle (only print failures, not test names)
   RUSTFLAGS: -Dwarnings
-  # Stripped release binary ceiling on linux-x86_64. The strategic 6MB "fits
-  # on a robot" moat is the aarch64 target — see the follow-up issue to add
-  # an aarch64 CI build with a tighter 7MB gate. Linux x86_64 reality has
-  # always run ~10MB even with `profile.release.strip = true`. Escape valve
-  # for genuine new heavy deps is feature-gating, not bumping this number.
+  # Stripped release binary ceiling on linux-x86_64. The strategic "fits
+  # on a robot" moat is the aarch64 target — enforced by the separate
+  # `binary-size-aarch64` job below (musl cross-build, 7MB gate). Linux
+  # x86_64 reality has always run ~10MB even with
+  # `profile.release.strip = true`. Escape valve for genuine new heavy
+  # deps is feature-gating, not bumping either number.
   BINARY_SIZE_LIMIT_MB: 11
+  # Stripped release binary ceiling on aarch64-unknown-linux-musl — the
+  # actual robot deployment target (Pi/Jetson-class Linux arm64). Same
+  # escape valve: feature-gate heavy deps, don't bump this number.
+  BINARY_SIZE_LIMIT_AARCH64_MB: 7
 
 jobs:
   test:
@@ -183,5 +188,36 @@ jobs:
           echo "### Binary size: ${size_mb} MB (limit ${BINARY_SIZE_LIMIT_MB} MB)" >> "$GITHUB_STEP_SUMMARY"
           if [ "${size_bytes}" -gt "${limit_bytes}" ]; then
             echo "::error::Binary exceeds ${BINARY_SIZE_LIMIT_MB} MB limit (${size_mb} MB > ${BINARY_SIZE_LIMIT_MB} MB). Either gate the offending dep behind a Cargo feature or reduce footprint — do not bump the budget without team sign-off." >&2
+            exit 1
+          fi
+
+  binary-size-aarch64:
+    name: Binary size (aarch64)
+    runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: binary-size-aarch64
+      - name: Install cross-linker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - run: cargo build --release --target aarch64-unknown-linux-musl --bin zeptoclaw
+      - name: Check binary size
+        run: |
+          size_bytes=$(stat --format=%s target/aarch64-unknown-linux-musl/release/zeptoclaw)
+          size_mb=$(awk "BEGIN {printf \"%.2f\", ${size_bytes}/1048576}")
+          limit_bytes=$(awk "BEGIN {printf \"%d\", ${BINARY_SIZE_LIMIT_AARCH64_MB}*1048576}")
+          echo "Binary size (aarch64): ${size_mb} MB (limit: ${BINARY_SIZE_LIMIT_AARCH64_MB} MB)"
+          echo "### Binary size (aarch64): ${size_mb} MB (limit ${BINARY_SIZE_LIMIT_AARCH64_MB} MB)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${size_bytes}" -gt "${limit_bytes}" ]; then
+            echo "::error::aarch64 binary exceeds ${BINARY_SIZE_LIMIT_AARCH64_MB} MB limit (${size_mb} MB > ${BINARY_SIZE_LIMIT_AARCH64_MB} MB). Either gate the offending dep behind a Cargo feature or reduce footprint — do not bump the budget without team sign-off." >&2
             exit 1
           fi
