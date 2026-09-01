@@ -105,7 +105,7 @@ impl MediaStore {
             .await?;
         crate::utils::perms::set_owner_only(&abs_path);
         use tokio::io::AsyncWriteExt;
-        file.write_all(&data).await?;
+        file.write_all(data).await?;
 
         Ok(rel_path)
     }

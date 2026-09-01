@@ -236,8 +236,10 @@ mod tests {
 
     #[test]
     fn test_audit_actor_id_preserves_chat_only_context() {
-        let mut ctx = ToolContext::default();
-        ctx.chat_id = Some("chat-42".to_string());
+        let ctx = ToolContext {
+            chat_id: Some("chat-42".to_string()),
+            ..ToolContext::default()
+        };
         assert_eq!(audit_actor_id(&ctx), "chat:chat-42");
     }
 

@@ -93,10 +93,8 @@ pub fn parse_persona_command(text: &str) -> Option<PersonaCommand> {
     // Must be exactly "/persona" or "/persona " followed by args
     let rest = if trimmed == "/persona" {
         ""
-    } else if let Some(after) = trimmed.strip_prefix("/persona ") {
-        after.trim()
     } else {
-        return None;
+        trimmed.strip_prefix("/persona ")?.trim()
     };
 
     if rest.is_empty() {

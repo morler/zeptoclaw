@@ -1199,9 +1199,11 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[tokio::test]
     async fn test_resolve_backend_auto_respects_docker_binary_override() {
-        let mut config = ContainerAgentConfig::default();
-        config.backend = ContainerAgentBackend::Auto;
-        config.docker_binary = Some("/definitely-not-a-real-docker-binary".to_string());
+        let config = ContainerAgentConfig {
+            backend: ContainerAgentBackend::Auto,
+            docker_binary: Some("/definitely-not-a-real-docker-binary".to_string()),
+            ..ContainerAgentConfig::default()
+        };
 
         let result = resolve_backend(&config).await;
         assert!(result.is_err());

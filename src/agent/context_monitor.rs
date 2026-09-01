@@ -861,7 +861,7 @@ mod tests {
         // 3050 chars: (3050/4+4)*1.2 = 766.5*1.2 ≈ 919. Ratio = 0.919 → Emergency
         let messages = vec![make_message(&"x".repeat(3050))];
         let est = ContextMonitor::estimate_tokens(&messages);
-        assert!(est >= 900 && est < 950, "Expected 900-950, got {est}");
+        assert!((900..950).contains(&est), "Expected 900-950, got {est}");
         assert_eq!(
             monitor.urgency(&messages),
             Some(CompactionUrgency::Emergency)

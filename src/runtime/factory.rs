@@ -272,8 +272,10 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn test_create_landlock_runtime() {
-        let mut config = RuntimeConfig::default();
-        config.runtime_type = RuntimeType::Landlock;
+        let config = RuntimeConfig {
+            runtime_type: RuntimeType::Landlock,
+            ..RuntimeConfig::default()
+        };
         let result = create_runtime(&config).await;
         assert!(
             result.is_ok(),
@@ -285,8 +287,10 @@ mod tests {
     #[cfg(all(target_os = "linux", not(feature = "sandbox-firejail")))]
     #[tokio::test]
     async fn test_create_firejail_without_feature_fails() {
-        let mut config = RuntimeConfig::default();
-        config.runtime_type = RuntimeType::Firejail;
+        let config = RuntimeConfig {
+            runtime_type: RuntimeType::Firejail,
+            ..RuntimeConfig::default()
+        };
         let result = create_runtime(&config).await;
         let err = result.err().expect("should be an error");
         assert!(err.to_string().contains("sandbox-firejail"));
@@ -295,8 +299,10 @@ mod tests {
     #[cfg(all(target_os = "linux", not(feature = "sandbox-bubblewrap")))]
     #[tokio::test]
     async fn test_create_bubblewrap_without_feature_fails() {
-        let mut config = RuntimeConfig::default();
-        config.runtime_type = RuntimeType::Bubblewrap;
+        let config = RuntimeConfig {
+            runtime_type: RuntimeType::Bubblewrap,
+            ..RuntimeConfig::default()
+        };
         let result = create_runtime(&config).await;
         let err = result.err().expect("should be an error");
         assert!(err.to_string().contains("sandbox-bubblewrap"));
