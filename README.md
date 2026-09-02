@@ -212,7 +212,7 @@ Configure in `~/.zeptoclaw/config.json` or via environment variables:
 {
   "providers": {
     "openrouter": { "api_key": "sk-or-..." },
-    "ollama": { "api_key": "ollama" }
+    "ollama": { "model": "qwen2.5:0.5b" }
   },
   "agents": { "defaults": { "model": "anthropic/claude-sonnet-4" } }
 }
